@@ -1,0 +1,8 @@
+.translation-notice{font-size:7px;line-height:1.4;color:#8b8998;margin:0 0 5px}
+.translation-unavailable{display:flex;gap:7px;padding:9px;border-radius:6px;background:#f8f6ff;color:#7869d4}
+.translation-unavailable>span{display:flex;flex-direction:column;gap:4px}
+.translation-unavailable strong{font-size:8px}
+.translation-unavailable small{font-size:7px;line-height:1.45;color:#858294}
+.dark-mode .translation-unavailable{background:#302d45;color:#bcb1ff}
+.dark-mode .translation-unavailable small{color:#c0bdd0}
+@media(max-width:560px){.theme-button{display:grid!important}}
