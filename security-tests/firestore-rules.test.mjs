@@ -184,12 +184,127 @@ test("study room owners and joined members can exchange messages, but outsiders 
     text: "Ready to review the first question.",
     createdAt: serverTimestamp(),
   }));
+  await assertSucceeds(setDoc(doc(collection(member.firestore(), "rooms/study-room/messages"), "tutor-message"), {
+    authorId: "room-member",
+    authorName: "OmniLearn AI Tutor",
+    text: "Let's review the idea step by step.",
+    isAI: true,
+    createdAt: serverTimestamp(),
+  }));
   await assertFails(setDoc(doc(collection(outsider.firestore(), "rooms/study-room/messages"), "message-2"), {
     authorId: "room-outsider",
     authorName: "Room Outsider",
     text: "This should not be accepted.",
     createdAt: serverTimestamp(),
   }));
+});
+
+test("room hosts manage peer meetings and active members share scoped Cloudinary documents", async () => {
+  await Promise.all(["meeting-owner", "meeting-member", "meeting-outsider"].map((uid) => seedProfile(uid)));
+  const owner = environment.authenticatedContext("meeting-owner", {
+    email: "meeting-owner@example.com",
+    email_verified: true,
+  });
+  const member = environment.authenticatedContext("meeting-member", {
+    email: "meeting-member@example.com",
+    email_verified: true,
+  });
+  const outsider = environment.authenticatedContext("meeting-outsider", {
+    email: "meeting-outsider@example.com",
+    email_verified: true,
+  });
+  const roomPath = "rooms/meeting-room";
+  await assertSucceeds(setDoc(doc(owner.firestore(), roomPath), {
+    name: "Peer learning room",
+    createdBy: "meeting-owner",
+    memberIds: ["meeting-owner"],
+    memberNames: { "meeting-owner": "Meeting Owner" },
+    isActive: true,
+    createdAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(doc(member.firestore(), roomPath), {
+    memberIds: arrayUnion("meeting-member"),
+    "memberNames.meeting-member": "Meeting Member",
+  }));
+
+  const meeting = doc(owner.firestore(), `${roomPath}/meetings/current`);
+  await assertSucceeds(setDoc(meeting, {
+    hostUid: "meeting-owner",
+    hostName: "Meeting Owner",
+    status: "active",
+    startedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(getDoc(doc(member.firestore(), `${roomPath}/meetings/current`)));
+  await assertFails(setDoc(doc(member.firestore(), `${roomPath}/meetings/current`), {
+    hostUid: "meeting-member",
+    hostName: "Meeting Member",
+    status: "active",
+    startedAt: serverTimestamp(),
+  }));
+
+  await assertSucceeds(setDoc(doc(member.firestore(), `${roomPath}/meetings/current/participants/meeting-member`), {
+    name: "Meeting Member",
+    sessionId: "member-session-1",
+    joinedAt: serverTimestamp(),
+    lastSeenAt: serverTimestamp(),
+  }));
+  await assertFails(setDoc(doc(outsider.firestore(), `${roomPath}/meetings/current/participants/meeting-outsider`), {
+    name: "Meeting Outsider",
+    sessionId: "outsider-session-1",
+    joinedAt: serverTimestamp(),
+    lastSeenAt: serverTimestamp(),
+  }));
+
+  const signalPath = `${roomPath}/meetings/current/signals/meeting-member__meeting-owner`;
+  await assertSucceeds(setDoc(doc(member.firestore(), signalPath), {
+    fromUid: "meeting-member",
+    toUid: "meeting-owner",
+    offer: { type: "offer", sdp: "test-offer-sdp" },
+    createdAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(doc(owner.firestore(), signalPath), {
+    answer: { type: "answer", sdp: "test-answer-sdp" },
+  }));
+  await assertSucceeds(setDoc(doc(collection(member.firestore(), `${signalPath}/candidates`), "candidate-1"), {
+    fromUid: "meeting-member",
+    toUid: "meeting-owner",
+    candidate: { candidate: "candidate:1 1 udp 1 127.0.0.1 9 typ host", sdpMid: "0", sdpMLineIndex: 0 },
+    createdAt: serverTimestamp(),
+  }));
+  await assertFails(getDoc(doc(outsider.firestore(), signalPath)));
+
+  const documentPath = `${roomPath}/documents/notes-pdf`;
+  await assertSucceeds(setDoc(doc(member.firestore(), documentPath), {
+    ownerUid: "meeting-member",
+    name: "lesson.pdf",
+    format: "pdf",
+    bytes: 42000,
+    publicId: "rooms/meeting-room/meeting-member/asset-123.pdf",
+    textContent: "Shared lesson text for the room tutor.",
+    createdAt: serverTimestamp(),
+  }));
+  await assertSucceeds(getDoc(doc(owner.firestore(), documentPath)));
+  await assertFails(getDoc(doc(outsider.firestore(), documentPath)));
+  await assertFails(setDoc(doc(member.firestore(), `${roomPath}/documents/bad-reference`), {
+    ownerUid: "meeting-member",
+    name: "outside.pdf",
+    format: "pdf",
+    bytes: 42000,
+    publicId: "rooms/another-room/meeting-member/asset-123.pdf",
+    createdAt: serverTimestamp(),
+  }));
+
+  await assertFails(updateDoc(meeting, {
+    status: "ended",
+    endedBy: "meeting-member",
+    endedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(meeting, {
+    status: "ended",
+    endedBy: "meeting-owner",
+    endedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(doc(owner.firestore(), roomPath), { isActive: false }));
 });
 
 test("active study-room members can collaborate on a shared notes board", async () => {

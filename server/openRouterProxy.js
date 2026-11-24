@@ -1,20 +1,20 @@
 const modelRoutes = {
-  explain: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
-  flowchart: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
-  bug_hunter: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
-  translate: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
-  complexity: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
-  summary: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"],
-  mindmap: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"],
-  quiz: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"],
-  flashcards: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"],
-  ask_doc: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"],
+  explain: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  flowchart: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  bug_hunter: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  translate: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  complexity: ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  summary: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  mindmap: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  quiz: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  flashcards: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3.5-lightning:free"],
+  ask_doc: ["google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free", "nvidia/nemotron-3.5-lightning:free"],
 };
 const speechModel = "fish-audio/s2.1-pro-free:free";
 const firebaseJwksUrl = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 const jwksCache = { keys: null, expiresAt: 0 };
 
-class ProxyServiceError extends Error {
+export class ProxyServiceError extends Error {
   constructor(message, status = 503) {
     super(message);
     this.status = status;
@@ -57,7 +57,7 @@ async function getFirebaseKey(keyId) {
   return key;
 }
 
-async function verifyFirebaseToken(authorization, projectId) {
+export async function verifyFirebaseToken(authorization, projectId) {
   const token = authorization?.match(/^Bearer ([^\s]+)$/)?.[1];
   if (!token || !projectId) throw new Error("Sign in with a verified Firebase account to continue.");
 
@@ -99,7 +99,7 @@ async function verifyFirebaseToken(authorization, projectId) {
   return { token, uid: claims.sub };
 }
 
-async function ensureNotBanned(projectId, token, uid) {
+export async function ensureNotBanned(projectId, token, uid) {
   const path = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/users/${encodeURIComponent(uid)}`;
   let response;
   try {

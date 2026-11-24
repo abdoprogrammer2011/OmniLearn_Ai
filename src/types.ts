@@ -13,4 +13,5 @@ export interface ChatMessage {
   time: string;
   createdAt?: Date;
   isAI?: boolean;
+  authorId?: string;
 }

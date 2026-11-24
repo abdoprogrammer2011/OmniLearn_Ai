@@ -102,6 +102,10 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive'])
           && request.resource.data.isActive == false)
         || (resource.data.isActive == true
+          && resource.data.createdBy == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive'])
+          && request.resource.data.isActive == false)
+        || (resource.data.isActive == true
           && request.auth.uid in request.resource.data.memberIds
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds', 'memberNames'])
           && request.resource.data.memberIds.hasAll(resource.data.memberIds)
@@ -121,13 +125,161 @@ service cloud.firestore {
         allow list: if false;
         allow create, update: if boardId == 'shared'
           && activeRoomMember()
-          && request.resource.data.keys().hasOnly(['content', 'updatedBy', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['content', 'diagram', 'updatedBy', 'updatedAt'])
           && request.resource.data.keys().hasAll(['content', 'updatedBy', 'updatedAt'])
           && request.resource.data.content is string
           && request.resource.data.content.size() <= 10000
+          && (!('diagram' in request.resource.data)
+            || (request.resource.data.diagram is string && request.resource.data.diagram.size() <= 30000))
           && request.resource.data.updatedBy == request.auth.uid
           && request.resource.data.updatedAt == request.time;
         allow delete: if false;
+      }
+
+      match /meetings/{meetingId} {
+        function activeRoomMember() {
+          return activeUser()
+            && get(/databases/$(database)/documents/rooms/$(roomId)).data.isActive == true
+            && request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberIds;
+        }
+        function roomHost() {
+          return get(/databases/$(database)/documents/rooms/$(roomId)).data.createdBy == request.auth.uid;
+        }
+        function activeMeeting() {
+          return meetingId == 'current'
+            && get(/databases/$(database)/documents/rooms/$(roomId)/meetings/current).data.status == 'active';
+        }
+        allow get, list: if activeRoomMember();
+        allow create: if meetingId == 'current'
+          && activeRoomMember()
+          && roomHost()
+          && request.resource.data.keys().hasOnly(['hostUid', 'hostName', 'status', 'startedAt'])
+          && request.resource.data.hostUid == request.auth.uid
+          && validText(request.resource.data.hostName, 80)
+          && request.resource.data.status == 'active'
+          && request.resource.data.startedAt == request.time;
+        allow update: if activeRoomMember()
+          && roomHost()
+          && meetingId == 'current'
+          && (
+            (resource.data.status == 'active'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'endedBy', 'endedAt'])
+              && request.resource.data.status == 'ended'
+              && request.resource.data.endedBy == request.auth.uid
+              && request.resource.data.endedAt == request.time)
+            || (resource.data.status == 'ended'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'hostUid', 'hostName', 'startedAt', 'endedBy', 'endedAt'])
+              && request.resource.data.hostUid == request.auth.uid
+              && validText(request.resource.data.hostName, 80)
+              && request.resource.data.status == 'active'
+              && request.resource.data.startedAt == request.time)
+          );
+        allow delete: if false;
+
+        match /participants/{participantId} {
+          function activeRoomMember() {
+            return activeUser()
+              && get(/databases/$(database)/documents/rooms/$(roomId)).data.isActive == true
+              && request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberIds;
+          }
+          function activeMeeting() {
+            return meetingId == 'current'
+              && get(/databases/$(database)/documents/rooms/$(roomId)/meetings/current).data.status == 'active';
+          }
+          allow read: if activeRoomMember() && activeMeeting();
+          allow create, update: if activeRoomMember()
+            && activeMeeting()
+            && participantId == request.auth.uid
+            && request.resource.data.keys().hasOnly(['name', 'sessionId', 'joinedAt', 'lastSeenAt'])
+            && validText(request.resource.data.name, 80)
+            && validText(request.resource.data.sessionId, 64)
+            && request.resource.data.joinedAt is timestamp
+            && request.resource.data.lastSeenAt == request.time;
+          allow delete: if activeRoomMember()
+            && participantId == request.auth.uid;
+        }
+
+        match /signals/{signalId} {
+          function activeRoomMember() {
+            return activeUser()
+              && get(/databases/$(database)/documents/rooms/$(roomId)).data.isActive == true
+              && request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberIds;
+          }
+          function activeMeeting() {
+            return meetingId == 'current'
+              && get(/databases/$(database)/documents/rooms/$(roomId)/meetings/current).data.status == 'active';
+          }
+          allow read: if activeRoomMember() && activeMeeting();
+          allow create: if activeRoomMember()
+            && activeMeeting()
+            && request.resource.data.keys().hasOnly(['fromUid', 'toUid', 'offer', 'createdAt'])
+            && request.resource.data.fromUid == request.auth.uid
+            && request.resource.data.toUid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberIds
+            && request.resource.data.offer is map
+            && request.resource.data.offer.keys().hasOnly(['type', 'sdp'])
+            && request.resource.data.offer.type == 'offer'
+            && validText(request.resource.data.offer.sdp, 500000)
+            && request.resource.data.createdAt == request.time;
+          allow update: if activeRoomMember()
+            && activeMeeting()
+            && request.auth.uid == resource.data.toUid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer'])
+            && request.resource.data.answer is map
+            && request.resource.data.answer.keys().hasOnly(['type', 'sdp'])
+            && request.resource.data.answer.type == 'answer'
+            && validText(request.resource.data.answer.sdp, 500000);
+          allow delete: if false;
+
+          match /candidates/{candidateId} {
+            function activeRoomMember() {
+              return activeUser()
+                && get(/databases/$(database)/documents/rooms/$(roomId)).data.isActive == true
+                && request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberIds;
+            }
+            function activeMeeting() {
+              return meetingId == 'current'
+                && get(/databases/$(database)/documents/rooms/$(roomId)/meetings/current).data.status == 'active';
+            }
+            allow read: if activeRoomMember() && activeMeeting();
+            allow create: if activeRoomMember()
+              && activeMeeting()
+              && request.resource.data.keys().hasOnly(['fromUid', 'toUid', 'candidate', 'createdAt'])
+              && request.resource.data.fromUid == request.auth.uid
+              && request.resource.data.toUid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberIds
+              && request.resource.data.candidate is map
+              && request.resource.data.candidate.candidate is string
+              && request.resource.data.candidate.candidate.size() <= 3000
+              && request.resource.data.createdAt == request.time;
+            allow update, delete: if false;
+          }
+        }
+      }
+
+      match /documents/{documentId} {
+        function activeRoomMember() {
+          return activeUser()
+            && get(/databases/$(database)/documents/rooms/$(roomId)).data.isActive == true
+            && request.auth.uid in get(/databases/$(database)/documents/rooms/$(roomId)).data.memberIds;
+        }
+        allow read: if activeRoomMember();
+        allow create: if activeRoomMember()
+          && request.resource.data.keys().hasOnly(['ownerUid', 'name', 'format', 'bytes', 'publicId', 'textContent', 'createdAt'])
+          && request.resource.data.keys().hasAll(['ownerUid', 'name', 'format', 'bytes', 'publicId', 'createdAt'])
+          && request.resource.data.ownerUid == request.auth.uid
+          && validText(request.resource.data.name, 180)
+          && request.resource.data.format in ['csv', 'docx', 'md', 'pdf', 'pptx', 'txt', 'xlsx']
+          && request.resource.data.bytes is int
+          && request.resource.data.bytes > 0
+          && request.resource.data.bytes <= 10000000
+          && request.resource.data.publicId is string
+          && request.resource.data.publicId.matches('^rooms/' + roomId + '/[A-Za-z0-9_-]+/[A-Za-z0-9-]+\\.(csv|docx|md|pdf|pptx|txt|xlsx)$')
+          && (!('textContent' in request.resource.data)
+            || (request.resource.data.textContent is string && request.resource.data.textContent.size() <= 30000))
+          && request.resource.data.createdAt == request.time;
+        allow update: if false;
+        allow delete: if activeRoomMember()
+          && (resource.data.ownerUid == request.auth.uid
+            || get(/databases/$(database)/documents/rooms/$(roomId)).data.createdBy == request.auth.uid);
       }
 
       match /messages/{messageId} {
@@ -138,9 +290,15 @@ service cloud.firestore {
         }
         allow read: if activeRoomMember();
         allow create: if activeRoomMember()
-          && request.resource.data.keys().hasOnly(['authorId', 'authorName', 'text', 'createdAt'])
+          && request.resource.data.keys().hasOnly(['authorId', 'authorName', 'text', 'isAI', 'createdAt'])
           && request.resource.data.authorId == request.auth.uid
-          && request.resource.data.authorName == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberNames[request.auth.uid]
+          && (
+            (!('isAI' in request.resource.data)
+              && request.resource.data.authorName == get(/databases/$(database)/documents/rooms/$(roomId)).data.memberNames[request.auth.uid])
+            || ('isAI' in request.resource.data
+              && request.resource.data.isAI == true
+              && request.resource.data.authorName == 'OmniLearn AI Tutor')
+          )
           && validText(request.resource.data.text, 2000)
           && request.resource.data.createdAt == request.time;
         allow update, delete: if false;

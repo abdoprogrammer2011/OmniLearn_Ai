@@ -3,6 +3,7 @@ import {
   arrayUnion,
   collection,
   collectionGroup,
+  deleteDoc,
   doc,
   getCountFromServer,
   getDoc,
@@ -140,6 +141,7 @@ export interface RoomMessageItem {
   authorId: string;
   authorName: string;
   text: string;
+  isAI: boolean;
   createdAt: Date | null;
 }
 
@@ -149,6 +151,7 @@ function messageFromSnapshot(snapshot: QueryDocumentSnapshot<DocumentData>): Roo
     authorId: snapshot.get("authorId"),
     authorName: snapshot.get("authorName"),
     text: snapshot.get("text"),
+    isAI: snapshot.get("isAI") === true,
     createdAt: snapshot.get("createdAt")?.toDate() ?? null,
   };
 }
@@ -160,6 +163,7 @@ export function subscribeRoomMessages(roomId: string, onUpdate: (messages: RoomM
 
 export interface RoomBoard {
   content: string;
+  diagram: string;
   updatedBy: string;
   updatedAt: Date | null;
 }
@@ -168,25 +172,277 @@ export function subscribeRoomBoard(roomId: string, onUpdate: (board: RoomBoard) 
   return onSnapshot(doc(requireDb(), "rooms", roomId, "board", "shared"), (snapshot) => {
     onUpdate({
       content: snapshot.exists() ? snapshot.get("content") : "",
+      diagram: snapshot.exists() ? snapshot.get("diagram") ?? "" : "",
       updatedBy: snapshot.exists() ? snapshot.get("updatedBy") : "",
       updatedAt: snapshot.exists() ? snapshot.get("updatedAt")?.toDate() ?? null : null,
     });
   }, (error) => onError(normalizeError(error)));
 }
 
-export async function saveRoomBoard(user: User, roomId: string, content: string) {
+export async function saveRoomBoard(user: User, roomId: string, content: string, diagram = "") {
   await setDoc(doc(requireDb(), "rooms", roomId, "board", "shared"), {
     content: content.slice(0, 10000),
+    diagram: diagram.slice(0, 30000),
     updatedBy: user.uid,
     updatedAt: serverTimestamp(),
   });
 }
 
-export async function sendRoomMessage(user: User, roomId: string, text: string) {
+export async function sendRoomMessage(user: User, roomId: string, text: string, isAI = false) {
   await addDoc(collection(requireDb(), "rooms", roomId, "messages"), {
     authorId: user.uid,
-    authorName: user.displayName ?? user.email?.split("@")[0] ?? "Learner",
+    authorName: isAI ? "OmniLearn AI Tutor" : user.displayName ?? user.email?.split("@")[0] ?? "Learner",
     text: text.trim(),
+    ...(isAI ? { isAI: true } : {}),
+    createdAt: serverTimestamp(),
+  });
+}
+
+export interface RoomDocumentItem {
+  id: string;
+  ownerUid: string;
+  name: string;
+  format: string;
+  bytes: number;
+  publicId: string;
+  textContent: string;
+  createdAt: Date | null;
+}
+
+export function subscribeRoomDocuments(
+  roomId: string,
+  onUpdate: (documents: RoomDocumentItem[]) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  const documents = query(
+    collection(requireDb(), "rooms", roomId, "documents"),
+    orderBy("createdAt", "desc"),
+    limit(30),
+  );
+  return onSnapshot(documents, (snapshot) => onUpdate(snapshot.docs.map((item) => ({
+    id: item.id,
+    ownerUid: item.get("ownerUid"),
+    name: item.get("name"),
+    format: item.get("format"),
+    bytes: item.get("bytes"),
+    publicId: item.get("publicId"),
+    textContent: item.get("textContent") ?? "",
+    createdAt: item.get("createdAt")?.toDate() ?? null,
+  }))), (error) => onError(normalizeError(error)));
+}
+
+export async function createRoomDocument(
+  user: User,
+  roomId: string,
+  document: Omit<RoomDocumentItem, "id" | "createdAt">,
+) {
+  await addDoc(collection(requireDb(), "rooms", roomId, "documents"), {
+    ...document,
+    ownerUid: user.uid,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function deleteRoomDocument(roomId: string, documentId: string) {
+  await deleteDoc(doc(requireDb(), "rooms", roomId, "documents", documentId));
+}
+
+export interface RoomMeeting {
+  id: string;
+  hostUid: string;
+  hostName: string;
+  status: "active" | "ended";
+  startedAt: Date | null;
+}
+
+export interface RoomMeetingParticipant {
+  uid: string;
+  name: string;
+  sessionId: string;
+  lastSeenAt: Date | null;
+}
+
+function meetingRef(roomId: string) {
+  return doc(requireDb(), "rooms", roomId, "meetings", "current");
+}
+
+export function subscribeRoomMeeting(
+  roomId: string,
+  onUpdate: (meeting: RoomMeeting | null) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(meetingRef(roomId), (snapshot) => {
+    onUpdate(snapshot.exists() ? {
+      id: snapshot.id,
+      hostUid: snapshot.get("hostUid"),
+      hostName: snapshot.get("hostName"),
+      status: snapshot.get("status"),
+      startedAt: snapshot.get("startedAt")?.toDate() ?? null,
+    } : null);
+  }, (error) => onError(normalizeError(error)));
+}
+
+export async function startRoomMeeting(user: User, roomId: string) {
+  await setDoc(meetingRef(roomId), {
+    hostUid: user.uid,
+    hostName: user.displayName ?? user.email?.split("@")[0] ?? "Room host",
+    status: "active",
+    startedAt: serverTimestamp(),
+  });
+}
+
+export async function endRoomMeeting(user: User, roomId: string) {
+  await updateDoc(meetingRef(roomId), {
+    status: "ended",
+    endedBy: user.uid,
+    endedAt: serverTimestamp(),
+  });
+}
+
+export async function closeStudyRoom(roomId: string) {
+  await updateDoc(doc(requireDb(), "rooms", roomId), { isActive: false });
+}
+
+function meetingParticipantsRef(roomId: string) {
+  return collection(requireDb(), "rooms", roomId, "meetings", "current", "participants");
+}
+
+export function subscribeMeetingParticipants(
+  roomId: string,
+  onUpdate: (participants: RoomMeetingParticipant[]) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(meetingParticipantsRef(roomId), (snapshot) => {
+    onUpdate(snapshot.docs.map((participant) => ({
+      uid: participant.id,
+      name: participant.get("name"),
+      sessionId: participant.get("sessionId"),
+      lastSeenAt: participant.get("lastSeenAt")?.toDate() ?? null,
+    })));
+  }, (error) => onError(normalizeError(error)));
+}
+
+export async function joinRoomMeeting(user: User, roomId: string, sessionId: string) {
+  await setDoc(doc(meetingParticipantsRef(roomId), user.uid), {
+    name: user.displayName ?? user.email?.split("@")[0] ?? "Learner",
+    sessionId,
+    joinedAt: serverTimestamp(),
+    lastSeenAt: serverTimestamp(),
+  });
+}
+
+export async function refreshRoomMeetingPresence(user: User, roomId: string) {
+  await updateDoc(doc(meetingParticipantsRef(roomId), user.uid), { lastSeenAt: serverTimestamp() });
+}
+
+export async function leaveRoomMeeting(user: User, roomId: string) {
+  await deleteDoc(doc(meetingParticipantsRef(roomId), user.uid));
+}
+
+export function roomMeetingSignalId(
+  firstUid: string,
+  firstSessionId: string,
+  secondUid: string,
+  secondSessionId: string,
+) {
+  const first = firstUid < secondUid
+    ? `${firstUid}_${firstSessionId}`
+    : `${secondUid}_${secondSessionId}`;
+  const second = firstUid < secondUid
+    ? `${secondUid}_${secondSessionId}`
+    : `${firstUid}_${firstSessionId}`;
+  return `${first}__${second}`;
+}
+
+export interface RoomMeetingSignal {
+  fromUid: string;
+  toUid: string;
+  offer?: RTCSessionDescriptionInit;
+  answer?: RTCSessionDescriptionInit;
+}
+
+function roomSignalRef(roomId: string, signalId: string) {
+  return doc(requireDb(), "rooms", roomId, "meetings", "current", "signals", signalId);
+}
+
+export function subscribeRoomMeetingSignal(
+  roomId: string,
+  signalId: string,
+  onUpdate: (signal: RoomMeetingSignal | null) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(roomSignalRef(roomId, signalId), (snapshot) => {
+    onUpdate(snapshot.exists() ? {
+      fromUid: snapshot.get("fromUid"),
+      toUid: snapshot.get("toUid"),
+      offer: snapshot.get("offer"),
+      answer: snapshot.get("answer"),
+    } : null);
+  }, (error) => onError(normalizeError(error)));
+}
+
+export async function publishRoomMeetingOffer(
+  roomId: string,
+  signalId: string,
+  fromUid: string,
+  toUid: string,
+  offer: RTCSessionDescriptionInit,
+) {
+  await setDoc(roomSignalRef(roomId, signalId), {
+    fromUid,
+    toUid,
+    offer: { type: offer.type, sdp: offer.sdp },
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function publishRoomMeetingAnswer(roomId: string, signalId: string, answer: RTCSessionDescriptionInit) {
+  await updateDoc(roomSignalRef(roomId, signalId), {
+    answer: { type: answer.type, sdp: answer.sdp },
+  });
+}
+
+export interface RoomIceCandidate {
+  id: string;
+  fromUid: string;
+  toUid: string;
+  candidate: RTCIceCandidateInit;
+}
+
+function roomCandidatesRef(roomId: string, signalId: string) {
+  return collection(roomSignalRef(roomId, signalId), "candidates");
+}
+
+export function subscribeRoomMeetingCandidates(
+  roomId: string,
+  signalId: string,
+  toUid: string,
+  onUpdate: (candidates: RoomIceCandidate[]) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  return onSnapshot(roomCandidatesRef(roomId, signalId), (snapshot) => {
+    onUpdate(snapshot.docs
+      .filter((candidate) => candidate.get("toUid") === toUid)
+      .map((candidate) => ({
+        id: candidate.id,
+        fromUid: candidate.get("fromUid"),
+        toUid: candidate.get("toUid"),
+        candidate: candidate.get("candidate"),
+      })));
+  }, (error) => onError(normalizeError(error)));
+}
+
+export async function publishRoomMeetingCandidate(
+  roomId: string,
+  signalId: string,
+  fromUid: string,
+  toUid: string,
+  candidate: RTCIceCandidate,
+) {
+  await addDoc(roomCandidatesRef(roomId, signalId), {
+    fromUid,
+    toUid,
+    candidate: candidate.toJSON(),
     createdAt: serverTimestamp(),
   });
 }

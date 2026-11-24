@@ -82,6 +82,12 @@ test("forwards only allowlisted model requests with the server API key", async (
   assert.notEqual(providerBody.messages[0].content, validPayload().messages[0].content);
   assert.equal("user" in providerBody, false);
   assert.equal(providerRequest.init.body.includes(firebaseToken()), false);
+
+  const fallbackResult = await request({
+    ...validPayload(),
+    model: "nvidia/nemotron-3.5-lightning:free",
+  }, token);
+  assert.equal(fallbackResult.status, 200);
 });
 
 test("rejects suspended accounts before forwarding AI content", async () => {

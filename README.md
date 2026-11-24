@@ -24,6 +24,8 @@ npx firebase-tools deploy --only firestore:rules,firestore:indexes
 
 The app requires verified email accounts. If Firebase reports `permission-denied`, deploy the current rules to the same project configured in `.env.local`, verify the account, and confirm the account is not suspended.
 
+Room document uploads use Cloudinary's `authenticated` delivery type. The browser never receives the API secret; room members request signed upload parameters and member-checked download links from the Vercel endpoint. Signed download links can still be forwarded by someone who has access to them. Add the three Cloudinary variables to `.env.local` for local use and to Vercel's server environment for production, then redeploy. Documents are limited to 10 MB and PDF, DOCX, PPTX, XLSX, CSV, Markdown, or plain text.
+
 ## OpenRouter configuration
 
 For production, deploy the project to Vercel and add these server environment variables in the Vercel project settings:
@@ -31,6 +33,7 @@ For production, deploy the project to Vercel and add these server environment va
 - `OPENROUTER_API_KEY`: OpenRouter key, server-side only.
 - `FIREBASE_PROJECT_ID`: Firebase project ID used by the web app.
 - `APP_URL`: the deployed app's origin, used in OpenRouter request headers.
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`: server-only credentials for signed, authenticated room-document uploads and downloads.
 
 Set the public `VITE_FIREBASE_*` values in Vercel as well. Redeploy after changing environment variables. Do not set `OPENROUTER_API_KEY` as a `VITE_` variable or put it in source control.
 
@@ -44,7 +47,7 @@ Firebase Authentication ID tokens are verified server-side using Google's public
 
 - **CodeLingo:** explain code, draw Mermaid flowcharts, identify likely bugs, translate between supported languages, and analyze time/space Big-O complexity.
 - **EduNotes AI:** extract text from PDFs in the browser, analyze text or images, create study summaries, concept maps, flashcards, and quizzes, ask questions grounded in a document, and optionally generate an Arabic or English voice summary.
-- **Study rooms:** Firebase-backed room chat and shared notes.
+- **Study rooms:** live Firestore whiteboard, peer-to-peer audio/video and screen sharing for small groups, signed Cloudinary document sharing, and an Arabic/English AI tutor with spoken answers and shared concept maps. Direct WebRTC calls use public STUN only and can be blocked by restrictive networks; production reliability across all networks requires a TURN service.
 - **Administration:** Firestore-backed reports, account suspension/restoration, and room closing. Closing a room hides it from active rooms while preserving nested messages and board data.
 
 Code, documents, and images are sent to OpenRouter only when the user requests an AI operation. The app stores activity metadata and quiz scores in Firestore, not raw code or study documents. Review OpenRouter and model-provider data policies before sharing sensitive material.
@@ -63,7 +66,7 @@ npm run test:rules
 npm run test:proxy
 ```
 
-The rules test suite uses the Firestore Emulator and covers user isolation, admin authorization, role escalation, moderation writes, and banned-account access. The proxy suite checks Firebase token verification, ban enforcement, model allowlisting, request-size limits, and that Firebase tokens are not forwarded to OpenRouter.
+The rules test suite uses the Firestore Emulator and covers user isolation, admin authorization, role escalation, moderation writes, banned-account access, room meeting signaling, and shared-document authorization. The proxy suite checks Firebase token verification, ban enforcement, model allowlisting, request-size limits, and that Firebase tokens are not forwarded to OpenRouter.
 
 ## Troubleshooting
 

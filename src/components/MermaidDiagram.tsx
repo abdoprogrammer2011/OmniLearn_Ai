@@ -26,7 +26,10 @@ export default function MermaidDiagram({ chart, compact = false }: { chart: stri
   useEffect(() => {
     let cancelled = false;
     const source = chart.trim().replace(/^```(?:mermaid)?\s*/i, "").replace(/\s*```$/, "").trim();
-    loadMermaid().then((mermaid) => mermaid.render(`mermaid-${generatedId}`, source)).then(({ svg: rendered }) => {
+    loadMermaid().then(async (mermaid) => {
+      await mermaid.parse(source);
+      return mermaid.render(`mermaid-${generatedId}`, source);
+    }).then(({ svg: rendered }) => {
       if (!cancelled) { setSvg(rendered); setError(""); }
     }).catch((caught: unknown) => {
       if (!cancelled) {

@@ -4,6 +4,7 @@ import MermaidDiagram from "./MermaidDiagram";
 import type { Flashcard } from "../types";
 import type { User } from "firebase/auth";
 import { logActivity, saveQuizScore } from "../services/firebaseData";
+import { extractDocumentText } from "../services/documentText";
 import { askDocument, generateStudyAudio, generateStudyGuide, type StudyAIResult } from "../services/omniEngine";
 
 type StudyTab = "summary" | "quiz" | "flashcards" | "ask";
@@ -122,24 +123,7 @@ export default function StudyWorkspace({ user }: { user: User }) {
     }
     setBusy(true);
     try {
-      let text: string;
-      if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-        const [{ default: workerUrl }, pdfjs] = await Promise.all([
-          import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
-          import("pdfjs-dist"),
-        ]);
-        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-        const document = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
-        const pages = await Promise.all(Array.from({ length: document.numPages }, async (_, index) => {
-          const page = await document.getPage(index + 1);
-          const content = await page.getTextContent();
-          return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
-        }));
-        text = pages.join("\n").trim();
-        if (!text) throw new Error("No readable text found. This PDF may contain scanned images instead of selectable text.");
-      } else {
-        text = await file.text();
-      }
+      const text = await extractDocumentText(file, 40_001);
       if (!text.trim()) throw new Error("This file does not contain any readable text.");
       if (text.length > 40_000) throw new Error("This document contains more than 40,000 characters. Paste a shorter section to create a study guide.");
       setSourceImage("");
