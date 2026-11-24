@@ -14,7 +14,7 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-Set the four `VITE_FIREBASE_*` values in `.env.local` from Firebase Console → Project settings → Your apps. Enable Email/Password and Google Authentication, create a Firestore database, and add `localhost` plus the deployed app domain to Authentication's authorized domains. Localhost sign-in uses a popup; deployed sign-in uses a same-tab redirect. If you browse locally at `127.0.0.1`, add that host to the authorized domains too, or use `http://localhost:5173`. Deploy `firestore.rules` before testing protected features:
+Set the four `VITE_FIREBASE_*` values in `.env.local` from Firebase Console → Project settings → Your apps. Enable Email/Password and Google Authentication, create a Firestore database, and add `localhost` plus the deployed app domain to Authentication's authorized domains. Google sign-in uses a popup, falling back to a same-tab redirect if the browser blocks it. If you browse locally at `127.0.0.1`, add that host to the authorized domains too, or use `http://localhost:5173`. Deploy `firestore.rules` before testing protected features:
 
 ```powershell
 npx firebase-tools login
@@ -70,7 +70,7 @@ The rules test suite uses the Firestore Emulator and covers user isolation, admi
 
 ## Troubleshooting
 
-- **Google sign-in / COOP warnings:** Local development uses a popup while deployed sign-in uses a same-tab redirect. Confirm the current hostname is listed under Firebase Authentication → Settings → Authorized domains; for local access, use `localhost` or also authorize `127.0.0.1`. Allow popups when using localhost.
+- **Google sign-in / COOP warnings:** Confirm the current hostname is listed under Firebase Authentication → Settings → Authorized domains; allow popups for the site, and use the same Firebase project in the browser app configuration and Google provider setup.
 - **`Couldn't open your workspace` / insufficient permissions:** deploy the current Firestore rules to the configured Firebase project, verify the email, and inspect `users/{uid}.isBanned`.
 - **AI endpoint returns 503:** configure `OPENROUTER_API_KEY` and `FIREBASE_PROJECT_ID` in the hosting provider's server environment, then redeploy.
 - **Model rate limit or unavailable:** the engine retries the configured fallback model automatically. If both free models are unavailable, retry later.

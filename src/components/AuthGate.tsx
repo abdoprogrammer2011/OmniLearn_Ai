@@ -128,16 +128,19 @@ export default function AuthGate({ checking, user, redirectError, onSignOut, onV
     if (!auth) return;
     setError(""); setMessage(""); setBusy(true);
     sessionStorage.removeItem("omnilearn-google-redirect-pending");
-    sessionStorage.setItem("omnilearn-google-redirect-pending", "true");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+      try {
         await signInWithPopup(auth, provider);
-        return;
+      } catch (caught) {
+        const code = typeof caught === "object" && caught !== null && "code" in caught
+          ? String(caught.code)
+          : "";
+        if (code !== "auth/popup-blocked") throw caught;
+        sessionStorage.setItem("omnilearn-google-redirect-pending", "true");
+        await signInWithRedirect(auth, provider);
       }
-      sessionStorage.setItem("omnilearn-google-redirect-pending", "true");
-      await signInWithRedirect(auth, provider);
     } catch (caught) {
       sessionStorage.removeItem("omnilearn-google-redirect-pending");
       setError(firebaseError(caught));
