@@ -124,8 +124,8 @@ test("forwards a bounded two-page scanned-PDF request and rejects excessive imag
   const calls = mockServices({ token });
   const page = "data:image/jpeg;base64,SGVsbG8=";
   const payload = {
-    task: "ask_doc",
-    model: "google/gemma-4-31b-it:free",
+    task: "vision",
+    model: "nvidia/nemotron-3.5-super-vl:free",
     messages: [
       { role: "system", content: "OmniLearn system instruction" },
       {
@@ -143,6 +143,9 @@ test("forwards a bounded two-page scanned-PDF request and rejects excessive imag
   const forwarded = calls.find(({ url }) => url.includes("openrouter.ai"));
   const forwardedUserContent = JSON.parse(forwarded.init.body).messages[1].content;
   assert.equal(forwardedUserContent.filter((part) => part.type === "image_url").length, 2);
+
+  const nonVisionModel = await request({ ...payload, model: "nvidia/nemotron-3-ultra-550b-a55b:free" }, token);
+  assert.equal(nonVisionModel.status, 400);
 
   const tooManyImages = {
     ...payload,

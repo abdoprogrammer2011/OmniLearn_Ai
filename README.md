@@ -2,7 +2,7 @@
 
 OmniLearn is a React, TypeScript, and Vite learning workspace. Firebase is used only for Authentication and Cloud Firestore. AI requests go through a Vercel serverless endpoint to OpenRouter; there are no Firebase Cloud Functions or `firebase-admin` dependencies.
 
-The AI engine routes code explanation, flowcharts, bug review, translation, and Big-O analysis to NVIDIA Nemotron 3 Ultra, with Gemma 4 31B as fallback. Study guides, quizzes, flashcards, and document Q&A use Gemma 4 31B with Gemma 4 26B as fallback. Fish Audio generates optional spoken study summaries. Free-model availability and rate limits depend on OpenRouter and may change.
+The AI engine routes code explanation, flowcharts, bug review, translation, and Big-O analysis to NVIDIA Nemotron 3 Ultra, with Gemma 4 31B as fallback. Study guides, quizzes, flashcards, and text document Q&A use Gemma 4 31B with Gemma 4 26B as fallback. Scanned PDFs and image questions use a separate vision-capable free-model route. Fish Audio generates optional spoken study summaries. Free-model availability and rate limits depend on OpenRouter and may change.
 
 ## Local setup
 
