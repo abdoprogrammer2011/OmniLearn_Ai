@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { createUserWithEmailAndPassword, GoogleAuthProvider, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithRedirect, updateProfile, type User } from "firebase/auth";
+import { createUserWithEmailAndPassword, GoogleAuthProvider, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, updateProfile, type User } from "firebase/auth";
 import { ArrowRight, BookOpenCheck, Braces, CheckCircle2, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 import { auth, firebaseReady } from "../firebase";
 
@@ -127,10 +127,16 @@ export default function AuthGate({ checking, user, redirectError, onSignOut, onV
   async function googleSignIn() {
     if (!auth) return;
     setError(""); setMessage(""); setBusy(true);
+    sessionStorage.removeItem("omnilearn-google-redirect-pending");
     sessionStorage.setItem("omnilearn-google-redirect-pending", "true");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
+      if (["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+        await signInWithPopup(auth, provider);
+        return;
+      }
+      sessionStorage.setItem("omnilearn-google-redirect-pending", "true");
       await signInWithRedirect(auth, provider);
     } catch (caught) {
       sessionStorage.removeItem("omnilearn-google-redirect-pending");
@@ -222,6 +228,8 @@ function firebaseError(error: unknown) {
     "auth/invalid-email": "Enter a valid email address.",
     "auth/weak-password": "Choose a stronger password with at least 6 characters.",
     "auth/redirect-cancelled-by-user": "Google sign-in was cancelled before finishing.",
+    "auth/popup-blocked": "Your browser blocked the Google sign-in popup. Allow popups for this site and try again.",
+    "auth/popup-closed-by-user": "The Google sign-in window was closed before sign-in finished.",
     "auth/unauthorized-domain": "This domain is not authorized for Firebase sign-in. Add it in Firebase Authentication settings.",
     "auth/too-many-requests": "Too many attempts. Wait a little and try again.",
     "auth/network-request-failed": "Network error. Check your connection and try again.",

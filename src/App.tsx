@@ -69,7 +69,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!auth || sessionStorage.getItem(googleRedirectPendingKey) !== "true") return;
+    const currentAuth = auth;
+    if (!currentAuth || sessionStorage.getItem(googleRedirectPendingKey) !== "true") return;
     let active = true;
     consumeGoogleRedirectResult().then((credential) => {
       if (!active) return;
@@ -78,8 +79,14 @@ export default function App() {
         setUser(credential.user);
         setAuthRequested(false);
         setRedirectError(null);
+      } else if (currentAuth.currentUser) {
+        setUser(currentAuth.currentUser);
+        setAuthRequested(false);
+        setRedirectError(null);
       } else {
-        setRedirectError(new Error("Google sign-in did not finish. Please try again."));
+        setRedirectError(new Error(
+          `Google returned without completing sign-in. Verify that ${window.location.hostname} is listed in Firebase Authentication > Settings > Authorized domains. For local development, use http://localhost:5173 or add 127.0.0.1 to the authorized domains.`,
+        ));
         setAuthRequested(true);
       }
     }).catch((error: unknown) => {
