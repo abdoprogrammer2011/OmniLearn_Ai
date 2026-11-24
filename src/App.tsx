@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { ArrowRight, Braces, LoaderCircle, Search, ShieldAlert, X } from "lucide-react";
-import { onIdTokenChanged, signOut, type User } from "firebase/auth";
+import { getRedirectResult, onIdTokenChanged, signOut, type User } from "firebase/auth";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 import AuthGate from "./components/AuthGate";
@@ -15,6 +15,14 @@ const CodeWorkspace = lazy(() => import("./components/CodeWorkspace"));
 const StudyWorkspace = lazy(() => import("./components/StudyWorkspace"));
 const RoomWorkspace = lazy(() => import("./components/RoomWorkspace"));
 const AdminControlRoom = lazy(() => import("./components/AdminControlRoom"));
+const googleRedirectPendingKey = "omnilearn-google-redirect-pending";
+let googleRedirectResult: ReturnType<typeof getRedirectResult> | undefined;
+
+function consumeGoogleRedirectResult() {
+  if (!auth) return Promise.resolve(null);
+  googleRedirectResult ??= getRedirectResult(auth);
+  return googleRedirectResult;
+}
 
 export default function App() {
   const [page, setPage] = useState<Page>("home");
@@ -27,7 +35,8 @@ export default function App() {
   const [profileError, setProfileError] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [isBanned, setIsBanned] = useState(false);
-  const [authRequested, setAuthRequested] = useState(false);
+  const [authRequested, setAuthRequested] = useState(() => sessionStorage.getItem(googleRedirectPendingKey) === "true");
+  const [redirectError, setRedirectError] = useState<unknown>(null);
 
   useEffect(() => {
     if (!auth) return;
@@ -60,6 +69,29 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!auth || sessionStorage.getItem(googleRedirectPendingKey) !== "true") return;
+    let active = true;
+    consumeGoogleRedirectResult().then((credential) => {
+      if (!active) return;
+      sessionStorage.removeItem(googleRedirectPendingKey);
+      if (credential) {
+        setUser(credential.user);
+        setAuthRequested(false);
+        setRedirectError(null);
+      } else {
+        setRedirectError(new Error("Google sign-in did not finish. Please try again."));
+        setAuthRequested(true);
+      }
+    }).catch((error: unknown) => {
+      if (!active) return;
+      sessionStorage.removeItem(googleRedirectPendingKey);
+      setRedirectError(error);
+      setAuthRequested(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
     if (!user || !profileReady) return;
     return subscribeUserAccess(user.uid, (access) => {
       setIsAdmin(access.isAdmin);
@@ -87,8 +119,11 @@ export default function App() {
   }, [user, profileReady]);
 
   async function logout() {
+    sessionStorage.removeItem(googleRedirectPendingKey);
     if (auth) await signOut(auth);
     setPage("home");
+    setAuthRequested(false);
+    setRedirectError(null);
   }
 
   async function refreshProfile() {
@@ -124,7 +159,7 @@ export default function App() {
     if (profileError && user?.emailVerified) {
       return <div className="auth-shell"><section className="auth-card config-card"><div className="auth-icon auth-error-icon"><ShieldAlert size={21} /></div><h1>Couldn't open your workspace</h1><p>{profileError}</p><button className="auth-primary" onClick={() => void refreshProfile()}>Retry secure setup</button><button className="auth-back" onClick={() => void logout()}>Sign out</button></section></div>;
     }
-    return <AuthGate checking={checking || Boolean(user?.emailVerified && !profileReady)} user={user} onSignOut={logout} onVerified={refreshProfile} onBackToLanding={() => setAuthRequested(false)} />;
+    return <AuthGate checking={checking || Boolean(user?.emailVerified && !profileReady)} user={user} redirectError={redirectError} onSignOut={logout} onVerified={refreshProfile} onBackToLanding={() => { sessionStorage.removeItem(googleRedirectPendingKey); setAuthRequested(false); setRedirectError(null); }} />;
   }
 
   return (

@@ -1,17 +1,18 @@
 import { FormEvent, useEffect, useState } from "react";
-import { createUserWithEmailAndPassword, GoogleAuthProvider, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup, updateProfile, type User } from "firebase/auth";
+import { createUserWithEmailAndPassword, GoogleAuthProvider, sendEmailVerification, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithRedirect, updateProfile, type User } from "firebase/auth";
 import { ArrowRight, BookOpenCheck, Braces, CheckCircle2, Eye, EyeOff, LoaderCircle, LockKeyhole, Mail, ShieldCheck, Sparkles, UsersRound } from "lucide-react";
 import { auth, firebaseReady } from "../firebase";
 
 interface AuthGateProps {
   checking: boolean;
   user: User | null;
+  redirectError?: unknown;
   onSignOut: () => Promise<void>;
   onVerified: () => Promise<void>;
   onBackToLanding: () => void;
 }
 
-export default function AuthGate({ checking, user, onSignOut, onVerified, onBackToLanding }: AuthGateProps) {
+export default function AuthGate({ checking, user, redirectError, onSignOut, onVerified, onBackToLanding }: AuthGateProps) {
   const [creating, setCreating] = useState(false);
   const [resetMode, setResetMode] = useState(false);
   const [name, setName] = useState("");
@@ -28,6 +29,10 @@ export default function AuthGate({ checking, user, onSignOut, onVerified, onBack
     const timer = window.setTimeout(() => setResendCountdown((seconds) => Math.max(0, seconds - 1)), 1000);
     return () => window.clearTimeout(timer);
   }, [resendCountdown]);
+
+  useEffect(() => {
+    if (redirectError) setError(firebaseError(redirectError));
+  }, [redirectError]);
 
   if (checking) return <div className="auth-loading"><LoaderCircle className="spin" size={25} /> Securing your workspace…</div>;
   if (!firebaseReady || !auth) return (
@@ -122,11 +127,13 @@ export default function AuthGate({ checking, user, onSignOut, onVerified, onBack
   async function googleSignIn() {
     if (!auth) return;
     setError(""); setMessage(""); setBusy(true);
+    sessionStorage.setItem("omnilearn-google-redirect-pending", "true");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithPopup(auth, provider);
+      await signInWithRedirect(auth, provider);
     } catch (caught) {
+      sessionStorage.removeItem("omnilearn-google-redirect-pending");
       setError(firebaseError(caught));
     } finally {
       setBusy(false);
@@ -214,8 +221,7 @@ function firebaseError(error: unknown) {
     "auth/invalid-credential": "The email or password is incorrect.",
     "auth/invalid-email": "Enter a valid email address.",
     "auth/weak-password": "Choose a stronger password with at least 6 characters.",
-    "auth/popup-closed-by-user": "The Google sign-in window was closed before finishing.",
-    "auth/popup-blocked": "Your browser blocked the sign-in window. Allow popups and try again.",
+    "auth/redirect-cancelled-by-user": "Google sign-in was cancelled before finishing.",
     "auth/unauthorized-domain": "This domain is not authorized for Firebase sign-in. Add it in Firebase Authentication settings.",
     "auth/too-many-requests": "Too many attempts. Wait a little and try again.",
     "auth/network-request-failed": "Network error. Check your connection and try again.",

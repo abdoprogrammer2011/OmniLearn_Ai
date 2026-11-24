@@ -37,8 +37,8 @@ export default function StudyWorkspace({ user }: { user: User }) {
   const quiz = insights?.quiz ?? [];
   const mindMap = useMemo(() => {
     const concepts = insights?.concepts ?? [];
-    const lines = concepts.map((concept, index) => `    A --> B${index}[${JSON.stringify(concept)}]`).join("\n");
-    return `flowchart TD\n    A([Your notes]) --> B0[Core ideas]\n${lines}`;
+    const lines = concepts.map((concept, index) => `    core --> concept${index}["${concept.replace(/[\r\n]+/g, " ").replace(/"/g, "#quot;")}"]`).join("\n");
+    return `flowchart TD\n    root(["Your notes"]) --> core["Core ideas"]\n${lines}`;
   }, [insights?.concepts]);
 
   useEffect(() => () => {

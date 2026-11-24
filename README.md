@@ -14,7 +14,7 @@ Copy-Item .env.example .env.local
 npm run dev
 ```
 
-Set the four `VITE_FIREBASE_*` values in `.env.local` from Firebase Console → Project settings → Your apps. Enable Email/Password and Google Authentication, create a Firestore database, and add `localhost` to Authentication's authorized domains. Deploy `firestore.rules` before testing protected features:
+Set the four `VITE_FIREBASE_*` values in `.env.local` from Firebase Console → Project settings → Your apps. Enable Email/Password and Google Authentication, create a Firestore database, and add `localhost` plus the deployed app domain to Authentication's authorized domains. Google sign-in uses a redirect flow, so the app returns to the same tab after authentication. Deploy `firestore.rules` before testing protected features:
 
 ```powershell
 npx firebase-tools login
@@ -67,7 +67,7 @@ The rules test suite uses the Firestore Emulator and covers user isolation, admi
 
 ## Troubleshooting
 
-- **Google popup `window.closed` / COOP warnings:** Vercel and the local Vite server use `Cross-Origin-Opener-Policy: same-origin-allow-popups`. The warnings are usually browser popup-isolation diagnostics; the sign-in result and Firebase error should be checked as well.
+- **Google sign-in / COOP warnings:** Google authentication uses a same-tab redirect instead of popup polling, avoiding `window.closed` / `window.close` COOP warnings. Confirm the current domain is listed under Firebase Authentication's authorized domains.
 - **`Couldn't open your workspace` / insufficient permissions:** deploy the current Firestore rules to the configured Firebase project, verify the email, and inspect `users/{uid}.isBanned`.
 - **AI endpoint returns 503:** configure `OPENROUTER_API_KEY` and `FIREBASE_PROJECT_ID` in the hosting provider's server environment, then redeploy.
 - **Model rate limit or unavailable:** the engine retries the configured fallback model automatically. If both free models are unavailable, retry later.
@@ -79,4 +79,4 @@ The rules test suite uses the Firestore Emulator and covers user isolation, admi
 - [`src/services/firebaseData.ts`](./src/services/firebaseData.ts): Firestore data and admin moderation operations.
 - [`firestore.rules`](./firestore.rules): access control for users, rooms, activity, and reports.
 - [`security-tests/firestore-rules.test.mjs`](./security-tests/firestore-rules.test.mjs): Firestore Emulator authorization tests.
-- [`vercel.json`](./vercel.json): popup-compatible COOP response header.
+- [`vercel.json`](./vercel.json): Cross-Origin-Opener-Policy response header.

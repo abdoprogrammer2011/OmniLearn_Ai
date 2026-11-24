@@ -25,10 +25,15 @@ export default function MermaidDiagram({ chart, compact = false }: { chart: stri
 
   useEffect(() => {
     let cancelled = false;
-    loadMermaid().then((mermaid) => mermaid.render(`mermaid-${generatedId}`, chart)).then(({ svg: rendered }) => {
+    const source = chart.trim().replace(/^```(?:mermaid)?\s*/i, "").replace(/\s*```$/, "").trim();
+    loadMermaid().then((mermaid) => mermaid.render(`mermaid-${generatedId}`, source)).then(({ svg: rendered }) => {
       if (!cancelled) { setSvg(rendered); setError(""); }
-    }).catch(() => {
-      if (!cancelled) { setSvg(""); setError("This diagram could not be rendered. Try simplifying the source text."); }
+    }).catch((caught: unknown) => {
+      if (!cancelled) {
+        if (import.meta.env.DEV) console.error("Mermaid diagram rendering failed.", caught);
+        setSvg("");
+        setError("This diagram could not be rendered. Try simplifying the source text.");
+      }
     });
     return () => { cancelled = true; };
   }, [chart, generatedId]);
