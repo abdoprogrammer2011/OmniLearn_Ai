@@ -118,3 +118,53 @@ test("rejects models outside the task allowlist and oversized payloads", async (
   const oversized = await request({ content: "x".repeat(4_200_001) });
   assert.equal(oversized.status, 413);
 });
+
+test("forwards a bounded two-page scanned-PDF request and rejects excessive image batches", async () => {
+  const token = firebaseToken();
+  const calls = mockServices({ token });
+  const page = "data:image/jpeg;base64,SGVsbG8=";
+  const payload = {
+    task: "ask_doc",
+    model: "google/gemma-4-31b-it:free",
+    messages: [
+      { role: "system", content: "OmniLearn system instruction" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Transcribe pages 1 and 2." },
+          { type: "image_url", image_url: { url: page } },
+          { type: "image_url", image_url: { url: page } },
+        ],
+      },
+    ],
+  };
+  const accepted = await request(payload, token);
+  assert.equal(accepted.status, 200);
+  const forwarded = calls.find(({ url }) => url.includes("openrouter.ai"));
+  const forwardedUserContent = JSON.parse(forwarded.init.body).messages[1].content;
+  assert.equal(forwardedUserContent.filter((part) => part.type === "image_url").length, 2);
+
+  const tooManyImages = {
+    ...payload,
+    messages: [
+      payload.messages[0],
+      { role: "user", content: [...payload.messages[1].content, { type: "image_url", image_url: { url: page } }] },
+    ],
+  };
+  const rejectedCount = await request(tooManyImages, token);
+  assert.equal(rejectedCount.status, 400);
+
+  const prefix = "data:image/jpeg;base64,";
+  const oversizedImage = {
+    ...payload,
+    messages: [
+      payload.messages[0],
+      { role: "user", content: [{ type: "text", text: "Transcribe this page." }, {
+        type: "image_url",
+        image_url: { url: `${prefix}${"A".repeat(3_800_001 - prefix.length)}` },
+      }] },
+    ],
+  };
+  const rejectedSize = await request(oversizedImage, token);
+  assert.equal(rejectedSize.status, 400);
+});

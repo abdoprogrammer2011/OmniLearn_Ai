@@ -4,7 +4,7 @@ import MermaidDiagram from "./MermaidDiagram";
 import type { Flashcard } from "../types";
 import type { User } from "firebase/auth";
 import { logActivity, saveQuizScore } from "../services/firebaseData";
-import { extractDocumentText } from "../services/documentText";
+import { extractDocumentText, extractScannedPdfText, isScannedPdfError } from "../services/documentText";
 import { askDocument, generateStudyAudio, generateStudyGuide, type StudyAIResult } from "../services/omniEngine";
 
 type StudyTab = "summary" | "quiz" | "flashcards" | "ask";
@@ -14,11 +14,14 @@ export default function StudyWorkspace({ user }: { user: User }) {
   const [responseLanguage, setResponseLanguage] = useState<"English" | "Arabic">("English");
   const [fileName, setFileName] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
+  const [scannedPdf, setScannedPdf] = useState<File | null>(null);
   const [insights, setInsights] = useState<StudyAIResult | null>(null);
   const [tab, setTab] = useState<StudyTab>("summary");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const [processingStatus, setProcessingStatus] = useState("");
+  const [sourceNotice, setSourceNotice] = useState("");
   const [cardIndex, setCardIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [answers, setAnswers] = useState<Record<number, number>>({});
@@ -32,7 +35,7 @@ export default function StudyWorkspace({ user }: { user: User }) {
   const [askError, setAskError] = useState("");
   const savedScore = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const hasSource = Boolean(draftNotes.trim() || sourceImage);
+  const hasSource = Boolean(draftNotes.trim() || sourceImage || scannedPdf);
   const hasInsights = insights !== null;
   const cards = insights?.flashcards ?? [];
   const quiz = insights?.quiz ?? [];
@@ -91,6 +94,7 @@ export default function StudyWorkspace({ user }: { user: User }) {
   async function handleFile(file?: File) {
     if (!file) return;
     setError("");
+    setSourceNotice("");
     if (file.size > 20 * 1024 * 1024) {
       setError("This file exceeds the 20 MB upload limit.");
       return;
@@ -101,6 +105,7 @@ export default function StudyWorkspace({ user }: { user: User }) {
       try {
         const image = await resizeStudyImage(file);
         setDraftNotes("");
+        setScannedPdf(null);
         setSourceImage(image);
         setFileName(file.name);
         setInsights(null);
@@ -122,11 +127,31 @@ export default function StudyWorkspace({ user }: { user: User }) {
       return;
     }
     setBusy(true);
+    setProcessingStatus("Reading your file…");
     try {
-      const text = await extractDocumentText(file, 40_001);
+      let text: string;
+      try {
+        text = await extractDocumentText(file, 40_001);
+      } catch (caught) {
+        if (extension !== "pdf" || !isScannedPdfError(caught)) throw caught;
+        setScannedPdf(file);
+        setSourceImage("");
+        setDraftNotes("");
+        setFileName(file.name);
+        setInsights(null);
+        setAudioUrl("");
+        setAudioError("");
+        setTab("summary");
+        setCardIndex(0);
+        setAnswers({});
+        savedScore.current = false;
+        setSourceNotice("Scanned PDF detected. Its pages are sent to the AI only when you create a study guide or ask a question.");
+        return;
+      }
       if (!text.trim()) throw new Error("This file does not contain any readable text.");
       if (text.length > 40_000) throw new Error("This document contains more than 40,000 characters. Paste a shorter section to create a study guide.");
       setSourceImage("");
+      setScannedPdf(null);
       setDraftNotes(text);
       setFileName(file.name);
       setInsights(null);
@@ -140,16 +165,17 @@ export default function StudyWorkspace({ user }: { user: User }) {
       setError(caught instanceof Error ? caught.message : "This file could not be read. Try a PDF or plain text file.");
     } finally {
       setBusy(false);
+      setProcessingStatus("");
     }
   }
 
   async function createGuide() {
-    const text = draftNotes.trim();
-    if (!text && !sourceImage) {
+    let text = draftNotes.trim();
+    if (!text && !sourceImage && !scannedPdf) {
       setError("Upload study material or paste your notes before creating a guide.");
       return;
     }
-    if (text.length > 40_000) {
+    if (!scannedPdf && text.length > 40_000) {
       setError("Your notes exceed the 40,000-character AI request limit. Shorten the text and try again.");
       return;
     }
@@ -165,6 +191,19 @@ export default function StudyWorkspace({ user }: { user: User }) {
     savedScore.current = false;
     setBusy(true);
     try {
+      if (scannedPdf) {
+        setProcessingStatus("Preparing scanned PDF pages for AI reading…");
+        const scannedText = await extractScannedPdfText(scannedPdf, (completed, total) => {
+          setProcessingStatus(`AI is reading scanned pages ${completed} of ${total}…`);
+        });
+        text = [scannedText, text].filter(Boolean).join("\n\n");
+        if (text.length > 40_000) {
+          throw new Error("The scanned document and notes exceed 40,000 characters. Split the PDF into smaller files and try again.");
+        }
+        setDraftNotes(text);
+        setScannedPdf(null);
+        setSourceNotice("AI read the scanned pages. You can now create a study guide or ask questions about the document.");
+      }
       const generated = await generateStudyGuide(text, sourceImage || undefined, responseLanguage);
       setInsights(generated);
       try {
@@ -181,11 +220,12 @@ export default function StudyWorkspace({ user }: { user: User }) {
       setError(caught instanceof Error ? caught.message : "The study guide could not be generated. Please try again.");
     } finally {
       setBusy(false);
+      setProcessingStatus("");
     }
   }
 
   function onFileChange(event: ChangeEvent<HTMLInputElement>) { void handleFile(event.target.files?.[0]); event.target.value = ""; }
-  function onDrop(event: DragEvent<HTMLDivElement>) { event.preventDefault(); setDragging(false); if (!busy) void handleFile(event.dataTransfer.files?.[0]); }
+  function onDrop(event: DragEvent<HTMLDivElement>) { event.preventDefault(); setDragging(false); if (!busy && !askBusy) void handleFile(event.dataTransfer.files?.[0]); }
 
   async function askAboutDocument(event: FormEvent) {
     event.preventDefault();
@@ -195,7 +235,21 @@ export default function StudyWorkspace({ user }: { user: User }) {
     setAskError("");
     setAnswer("");
     try {
-      const response = await askDocument(prompt, draftNotes.trim(), sourceImage || undefined, responseLanguage);
+      let text = draftNotes.trim();
+      if (scannedPdf) {
+        setProcessingStatus("Preparing scanned PDF pages for AI reading…");
+        const scannedText = await extractScannedPdfText(scannedPdf, (completed, total) => {
+          setProcessingStatus(`AI is reading scanned pages ${completed} of ${total}…`);
+        });
+        text = [scannedText, text].filter(Boolean).join("\n\n");
+        if (text.length > 40_000) {
+          throw new Error("The scanned document and notes exceed 40,000 characters. Split the PDF into smaller files and try again.");
+        }
+        setDraftNotes(text);
+        setScannedPdf(null);
+        setSourceNotice("AI read the scanned pages. You can now create a study guide or ask questions about the document.");
+      }
+      const response = await askDocument(prompt, text, sourceImage || undefined, responseLanguage);
       setAnswer(response);
       try {
         await logActivity(user.uid, {
@@ -240,19 +294,20 @@ export default function StudyWorkspace({ user }: { user: User }) {
         <aside className="study-source">
           <div className="source-heading"><div><p className="section-kicker">YOUR SOURCE</p><h3>Study material</h3></div><span className="source-format-label">PDF · TXT · IMAGE</span></div>
           <label className="study-language-label">Guide and voice language<select value={responseLanguage} disabled={busy || askBusy} onChange={(event) => setResponseLanguage(event.target.value as "English" | "Arabic")}><option>English</option><option>Arabic</option></select></label>
-          <div className={`upload-zone ${dragging ? "dragging" : ""}`} aria-disabled={busy} onDragOver={(event) => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop} onClick={() => { if (!busy) inputRef.current?.click(); }}>
-            <input ref={inputRef} type="file" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,text/plain,application/pdf,image/jpeg,image/png,image/webp" hidden disabled={busy} onChange={onFileChange} />
+          <div className={`upload-zone ${dragging ? "dragging" : ""}`} aria-disabled={busy || askBusy} onDragOver={(event) => { event.preventDefault(); if (!busy && !askBusy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop} onClick={() => { if (!busy && !askBusy) inputRef.current?.click(); }}>
+            <input ref={inputRef} type="file" accept=".pdf,.txt,.jpg,.jpeg,.png,.webp,text/plain,application/pdf,image/jpeg,image/png,image/webp" hidden disabled={busy || askBusy} onChange={onFileChange} />
             <div className="upload-icon">{busy ? <LoaderCircle size={20} className="spin" /> : <UploadCloud size={20} />}</div>
-            <strong>{busy ? "Reading your file…" : "Drop a file to get started"}</strong>
+            <strong aria-live="polite">{busy || askBusy ? processingStatus || "Reading your file…" : "Drop a file to get started"}</strong>
             <span>or <u>browse files</u> on your device</span><small>PDF, TXT, JPG, PNG, or WebP · up to 20 MB</small>
           </div>
+          {sourceNotice && <p className="scanned-pdf-notice" role="status">{sourceNotice}</p>}
           {error && <p className="inline-error file-error" role="alert">{error}</p>}
           <label className="paste-notes-label" htmlFor="paste-study-notes">Or paste your notes</label>
           <textarea className="paste-notes-input" id="paste-study-notes" disabled={busy} value={draftNotes} onChange={(event) => setDraftNotes(event.target.value)} placeholder="Paste lecture notes or study material here…" maxLength={40000} />
-          <button className="use-notes-button" onClick={() => void createGuide()} disabled={(!draftNotes.trim() && !sourceImage) || busy}>{busy ? <LoaderCircle size={14} className="spin" /> : null} {insights ? "Regenerate study guide" : "Create study guide"} <ArrowRight size={14} /></button>
-          {hasSource && <div className="source-file"><div className="pdf-icon"><FileText size={18} /></div><div className="source-file-info"><strong>{fileName || "Pasted notes"}</strong><span>{insights ? "Study guide ready" : "Source ready · not saved to your account"}</span></div><button disabled={busy || askBusy} aria-label="Remove source" onClick={() => { setFileName(""); setSourceImage(""); setDraftNotes(""); setInsights(null); setAudioUrl(""); setAudioError(""); setQuestion(""); setAnswer(""); setAskError(""); setAnswers({}); savedScore.current = false; }}><X size={15} /></button></div>}
+          <button className="use-notes-button" onClick={() => void createGuide()} disabled={(!draftNotes.trim() && !sourceImage && !scannedPdf) || busy}>{busy ? <LoaderCircle size={14} className="spin" /> : null} {insights ? "Regenerate study guide" : "Create study guide"} <ArrowRight size={14} /></button>
+          {hasSource && <div className="source-file"><div className="pdf-icon"><FileText size={18} /></div><div className="source-file-info"><strong>{fileName || "Pasted notes"}</strong><span>{insights ? "Study guide ready" : scannedPdf ? "Scanned PDF · AI reading on request" : "Source ready · not saved to your account"}</span></div><button disabled={busy || askBusy} aria-label="Remove source" onClick={() => { setFileName(""); setSourceImage(""); setDraftNotes(""); setScannedPdf(null); setSourceNotice(""); setInsights(null); setAudioUrl(""); setAudioError(""); setQuestion(""); setAnswer(""); setAskError(""); setAnswers({}); savedScore.current = false; }}><X size={15} /></button></div>}
           <div className="source-divider" />
-          <div className="source-tip"><span><ShieldCheck size={14} /></span><div><strong>Your material stays out of OmniLearn storage</strong><p>Text or images are sent to the OmniLearn AI Engine for analysis; the summary is sent for speech only when requested. OmniLearn stores only activity metadata.</p></div></div>
+          <div className="source-tip"><span><ShieldCheck size={14} /></span><div><strong>Your material stays out of OmniLearn storage</strong><p>Text and images are sent to the AI Engine only for requested analysis. Scanned PDF pages are read only when you create a guide or ask a question; OmniLearn stores only activity metadata.</p></div></div>
         </aside>
         <main className="study-results">
           <div className="study-file-title"><div className="study-file-mark"><FileText size={17} /></div><div><strong>{hasSource ? (fileName || "Pasted notes").replace(/\.[^/.]+$/, "") : "No study material yet"}</strong><span>{insights ? "Study guide · OmniLearn AI Engine" : hasSource ? "Source is ready for analysis" : "Upload a PDF or paste notes to get started"}</span></div><button className="icon-button" aria-label="Download study guide" onClick={downloadStudyGuide} disabled={!hasInsights}><ArrowDownToLine size={16} /></button></div>

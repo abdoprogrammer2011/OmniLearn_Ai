@@ -30,11 +30,13 @@ export default function RoomWorkspace({ user }: { user: User }) {
   const documentInput = useRef<HTMLInputElement>(null);
   const boardDirtyRef = useRef(false);
   const boardSavingRef = useRef(false);
+  const joiningRoomsRef = useRef(new Set<string>());
   const boardDraftRef = useRef(boardDraft);
   const boardDiagramRef = useRef(boardDiagram);
   boardDraftRef.current = boardDraft;
   boardDiagramRef.current = boardDiagram;
   const room = rooms.find((item) => item.id === roomId);
+  const isRoomMember = Boolean(room?.memberIds.includes(user.uid));
   const participants = useMemo(() => room ? room.memberIds.map((id, index) => ({
     id,
     name: room.memberNames[id] ?? "Room member",
@@ -53,13 +55,21 @@ export default function RoomWorkspace({ user }: { user: User }) {
   useEffect(() => {
     if (!room) return;
     window.location.hash = `room=${room.id}`;
-    if (room.memberIds.includes(user.uid)) return;
-    void joinRoom(user, room.id).catch((error: Error) => setRoomError(`Couldn't join this room: ${error.message}`));
+    if (room.memberIds.includes(user.uid)) {
+      joiningRoomsRef.current.delete(room.id);
+      return;
+    }
+    if (joiningRoomsRef.current.has(room.id)) return;
+    joiningRoomsRef.current.add(room.id);
+    void joinRoom(user, room.id).catch((error: Error) => {
+      joiningRoomsRef.current.delete(room.id);
+      setRoomError(`Couldn't join this room: ${error.message}`);
+    });
   }, [room, user]);
 
   useEffect(() => {
     setMessages([]);
-    if (!roomId) return;
+    if (!roomId || !isRoomMember) return;
     return subscribeRoomMessages(roomId, (items) => setMessages(items.map((item) => ({
       id: item.id,
       name: item.authorName,
@@ -69,13 +79,13 @@ export default function RoomWorkspace({ user }: { user: User }) {
       createdAt: item.createdAt ?? undefined,
       time: item.createdAt?.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) ?? "Now",
     }))), (error) => setRoomError(error.message));
-  }, [roomId]);
+  }, [roomId, isRoomMember]);
 
   useEffect(() => {
     setDocuments([]);
-    if (!roomId) return;
+    if (!roomId || !isRoomMember) return;
     return subscribeRoomDocuments(roomId, setDocuments, (error) => setRoomError(error.message));
-  }, [roomId]);
+  }, [roomId, isRoomMember]);
 
   useEffect(() => {
     boardDirtyRef.current = false;
@@ -83,7 +93,7 @@ export default function RoomWorkspace({ user }: { user: User }) {
     setBoardDiagram("");
     setBoardDirty(false);
     setBoardSnapshot({ content: "", diagram: "", updatedBy: "", updatedAt: null });
-    if (!roomId) return;
+    if (!roomId || !isRoomMember) return;
     return subscribeRoomBoard(roomId, (snapshot) => {
       setBoardSnapshot(snapshot);
       if (!boardDirtyRef.current) {
@@ -91,7 +101,7 @@ export default function RoomWorkspace({ user }: { user: User }) {
         setBoardDiagram(snapshot.diagram);
       }
     }, (error) => setRoomError(error.message));
-  }, [roomId]);
+  }, [roomId, isRoomMember]);
 
   const chatMessages = messages;
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages.length]);
@@ -253,7 +263,7 @@ export default function RoomWorkspace({ user }: { user: User }) {
       <div className="room-management-bar"><label><span>YOUR LIVE ROOMS</span><select aria-label="Choose a study room" value={roomId} onChange={(event) => setRoomId(event.target.value)}>{rooms.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><button className="primary-button small-primary" onClick={() => { setCreating(!creating); setRoomError(""); }}><Plus size={14} /> Create room</button></div>
       {creating && <form className="room-create-form" onSubmit={(event) => void submitRoom(event)}><label>Give your study room a name<input autoFocus minLength={3} maxLength={80} required value={roomName} onChange={(event) => setRoomName(event.target.value)} placeholder="e.g. Data structures study group" /></label><button className="primary-button small-primary" disabled={busy}>{busy ? <LoaderCircle className="spin" size={14} /> : "Create room"}</button><button type="button" className="icon-button" aria-label="Cancel room creation" onClick={() => setCreating(false)}><X size={15} /></button></form>}
       {roomError && <p className="inline-error room-error" role="alert">{roomError}</p>}
-      {!room ? <section className="room-empty-state"><span><UsersRound size={23} /></span><h2>Your first study room starts here.</h2><p>Create a room, invite classmates, and work through ideas together. Messages are shared live with signed-in room members.</p><button className="primary-button" onClick={() => setCreating(true)}><Plus size={15} /> Create a study room</button></section> : <div className="room-workspace">
+      {!room ? <section className="room-empty-state"><span><UsersRound size={23} /></span><h2>Your first study room starts here.</h2><p>Create a room, invite classmates, and work through ideas together. Messages are shared live with signed-in room members.</p><button className="primary-button" onClick={() => setCreating(true)}><Plus size={15} /> Create a study room</button></section> : !isRoomMember ? <section className="room-empty-state" role="status"><LoaderCircle className="spin" size={23} /><h2>Joining {room.name}…</h2><p>Room tools will load after your access is confirmed.</p></section> : <div className="room-workspace">
         <section className="room-main">
           <div className="room-titlebar"><div className="room-title"><div className="room-title-icon"><Sparkles size={16} /></div><div><h2>{room.name}</h2><span>{participants.length} {participants.length === 1 ? "member has" : "members have"} access to this room</span></div></div></div>
           <RoomMeeting room={room} user={user} onInvite={() => void shareRoom()} onNotice={setNotice} />

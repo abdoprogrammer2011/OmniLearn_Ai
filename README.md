@@ -46,7 +46,7 @@ Firebase Authentication ID tokens are verified server-side using Google's public
 ## Features
 
 - **CodeLingo:** explain code, draw Mermaid flowcharts, identify likely bugs, translate between supported languages, and analyze time/space Big-O complexity.
-- **EduNotes AI:** extract text from PDFs in the browser, analyze text or images, create study summaries, concept maps, flashcards, and quizzes, ask questions grounded in a document, and optionally generate an Arabic or English voice summary.
+- **EduNotes AI:** extract selectable PDF text in the browser and read scanned PDF pages with vision-capable AI when a study guide or document answer is requested; analyze text or images, create summaries, concept maps, flashcards, and quizzes, and optionally generate an Arabic or English voice summary.
 - **Study rooms:** live Firestore whiteboard, peer-to-peer audio/video and screen sharing for small groups, signed Cloudinary document sharing, and an Arabic/English AI tutor with spoken answers and shared concept maps. Direct WebRTC calls use public STUN only and can be blocked by restrictive networks; production reliability across all networks requires a TURN service.
 - **Administration:** Firestore-backed reports, account suspension/restoration, and room closing. Closing a room hides it from active rooms while preserving nested messages and board data.
 
@@ -71,7 +71,8 @@ The rules test suite uses the Firestore Emulator and covers user isolation, admi
 ## Troubleshooting
 
 - **Google sign-in / COOP warnings:** Confirm the current hostname is listed under Firebase Authentication → Settings → Authorized domains; allow popups for the site, and use the same Firebase project in the browser app configuration and Google provider setup.
-- **`Couldn't open your workspace` / insufficient permissions:** deploy the current Firestore rules to the configured Firebase project, verify the email, and inspect `users/{uid}.isBanned`.
+- **Insufficient permissions in a meeting or room:** deploy the current `firestore.rules` to the same Firebase project used by the app (`npx firebase-tools deploy --only firestore:rules`), verify the email, and inspect `users/{uid}.isBanned`. Room subscriptions start only after Firestore confirms that the user is a room member.
+- **Scanned PDF reports no readable text:** choose Create study guide or Ask your document; scanned pages are sent to the vision model then, in batches of two. Split PDFs that exceed the 40,000-character supported output limit.
 - **AI endpoint returns 503:** configure `OPENROUTER_API_KEY` and `FIREBASE_PROJECT_ID` in the hosting provider's server environment, then redeploy.
 - **Model rate limit or unavailable:** the engine retries the configured fallback model automatically. If both free models are unavailable, retry later.
 - **Missing favicon:** the app includes an inline SVG favicon, so the browser should not need `/favicon.ico`.

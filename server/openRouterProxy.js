@@ -130,13 +130,24 @@ function validateMessages(messages) {
   const user = messages[1].content;
   if (typeof system !== "string" || system.length > 4000) return false;
   if (typeof user === "string") return user.length > 0 && user.length <= 60_000;
-  if (!Array.isArray(user) || user.length < 1 || user.length > 2) return false;
-  return user.every((part) => {
-    if (part?.type === "text") return typeof part.text === "string" && part.text.length <= 60_000;
+  if (!Array.isArray(user) || user.length < 1 || user.length > 3) return false;
+  let textLength = 0;
+  let imageLength = 0;
+  let imageCount = 0;
+  for (const part of user) {
+    if (part?.type === "text") {
+      if (typeof part.text !== "string") return false;
+      textLength += part.text.length;
+      if (textLength > 60_000) return false;
+      continue;
+    }
     if (part?.type !== "image_url" || typeof part.image_url?.url !== "string") return false;
-    return part.image_url.url.length <= 3_900_000
-      && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(part.image_url.url);
-  });
+    imageLength += part.image_url.url.length;
+    imageCount += 1;
+    if (imageCount > 2 || imageLength > 3_800_000
+      || !/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(part.image_url.url)) return false;
+  }
+  return textLength > 0;
 }
 
 async function proxyChat({ payload, apiKey, referer }) {
